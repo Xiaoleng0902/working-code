@@ -1,0 +1,12 @@
+import pandas as pd
+# 创建一个包含表格文件名的列表
+file_names = all_path
+# 创建一个空列表，用于存储每个表格的DataFrame
+dfs = []
+# 使用for循环遍历文件名列表并读取每个表格
+for file in file_names:
+    df = pd.read_table(file,sep="\t")
+    dfs.append(df)
+# 使用concat函数将所有DataFrame整合在一起
+combined_df = pd.concat(dfs)
+# 打印整合后的DataFrame
