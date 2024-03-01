@@ -1,0 +1,103 @@
+import os
+import re
+import pandas as pd 
+
+class TF_Data_Processing():
+    def __init__(self,dir_path,cancer,select_slice_path,save_path):
+
+        self.cancer=cancer
+        self.dir_path=dir_path
+        self.save_path=save_path
+        self.select_slice_path=select_slice_path
+        self.file_name=os.listdir(self.dir_path)
+        self.file_path= [os.path.join(self.dir_path,i) for i in os.listdir(self.dir_path)]
+    
+
+
+    def Create_folder(self):
+
+        if not os.path.exists(self.save_path):
+            os.makedirs(self.save_path)
+
+
+
+    def Single_slice_data_extraction(self):
+
+        all_slice=pd.read_csv(self.select_slice_path)["slice"].values
+        for i in self.file_name:
+            cancer=re.findall(r'\D+', i.split("-")[0])
+            slice=i.split(".loom.tsv")[0]
+            if cancer[0] == self.cancer and slice in all_slice:
+                data=pd.read_csv(os.path.join(self.dir_path,i),sep="\t")
+                data["TF"].value_counts().to_csv(self.save_path+"\\"+slice+".csv",columns=["TF"])
+    
+
+
+    def TF_slice_num_statistics(self):
+
+        TF_file_path= [os.path.join(self.save_path,i) for i in os.listdir(self.save_path)]
+        dfs = []
+        for file in TF_file_path:
+            cancer = re.findall(self.cancer, file)
+            if cancer[0]==self.cancer:
+                df = pd.read_table(file,sep=",",index_col=0)
+                dfs.append(df)
+        combined_df = pd.concat(dfs,axis=0).index.value_counts()
+        combined_df=pd.DataFrame(combined_df)
+        combined_df.columns=["slice_num"]
+        combined_df["all_slice_num"]=[len(TF_file_path) for i in range(len(combined_df.index))]
+        combined_df["ratio"]=(combined_df["slice_num"]/combined_df["all_slice_num"]).round(3)
+        combined_df.to_csv(os.path.join(self.save_path,"TF-slice-num.csv"))
+        print(f"{self.cancer}的TF-slice数目统计完成了!")
+        print("******************************************************************************************************************")
+        print(combined_df)
+
+
+
+    def Drop_single_slice_file(self):
+
+        files=os.listdir(self.save_path)
+        for file in files:
+            cancer=re.findall(r'\D+', file.split("-")[0])
+            if cancer[0]==self.cancer:
+                file_path = os.path.join(self.save_path, file)
+                os.remove(file_path)
+    
+
+
+
+    def TF_terget_statistics(self):
+
+        dfs = []
+        select_slice=pd.read_csv(self.select_slice_path)["slice"].values
+        for i in self.file_name:
+            cancer=re.findall(r'\D+', i.split("-")[0])
+            slice=i.split(".loom.tsv")[0]
+            if cancer[0] == self.cancer and slice in select_slice:
+                data=pd.read_csv(os.path.join(self.dir_path,i),sep="\t")
+                data["slice"]=[slice for i in range(len(data.index))]
+                data["cancer"]=[cancer[0] for i in range(len(data.index))]
+                dfs.append(data)
+        combined_df = pd.concat(dfs)
+        group_list=combined_df.groupby("TF")
+        num=0
+        table=pd.DataFrame(columns=["TF","target","target_num","importance","slice","cancer"])
+        for group_name, group_data in group_list:
+            target=[i for i in group_data["target"]]
+            importance=[i for i in group_data["importance"]]
+            slice=[i for i in group_data["slice"]]
+            cancer=[i for i in group_data["cancer"]]
+            target_num=len(target)
+            table.loc[num,"TF"]=group_name
+            table.loc[num,"target"]=target
+            table.loc[num,"target_num"]=target_num
+            table.loc[num,"importance"]=importance
+            table.loc[num,"slice"]=slice
+            table.loc[num,"cancer"]=cancer
+            num+=1
+        table.to_csv(self.save_path+"\\TF-Statistics"+".csv",index=False)
+        print(f"{self.cancer}的TF-target统计完成了!")
+        print("******************************************************************************************************************")
+        print(table)
+        
+                
