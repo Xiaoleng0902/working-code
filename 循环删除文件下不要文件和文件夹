@@ -1,0 +1,31 @@
+import os
+import shutil
+import pandas as pd 
+path=os.listdir("new_result")
+for i in path:
+    file=os.path.join("new_result\\"+i,"cell_type_assignments_by_spot_jitter.png")
+    if os.path.exists(file):
+        os.remove(file)
+        print(f'{file} 已删除')
+    file=os.path.join("new_result\\"+i,"cell_type_assignments_by_spot.png")
+    if os.path.exists(file):
+        os.remove(file)
+        print(f'{file} 已删除')
+    file=os.path.join("new_result\\"+i,"Seurat_cellfracs.txt")
+    if os.path.exists(file):
+        os.remove(file)
+        print(f'{file} 已删除')
+    file=os.path.join("new_result\\"+i,"Seurat_weights.txt")
+    if os.path.exists(file):
+        os.remove(file)
+        print(f'{file} 已删除')
+    file=os.path.join("new_result\\"+i,"log.txt")
+    if os.path.exists(file):
+        os.remove(file)
+        print(f'{file} 已删除')
+    file=os.path.join("new_result\\"+i,"assigned_expression")
+    if os.path.exists(file):
+        shutil.rmtree(file)
+        print(f'{file} 已删除')
+    
+    
