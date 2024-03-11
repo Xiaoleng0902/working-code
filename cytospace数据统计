@@ -1,0 +1,19 @@
+import  os
+import pandas as pd 
+path=os.listdir("new_result")
+for i in path:
+    table=pd.DataFrame()
+    data_path=os.path.join("new_result\\"+i,"assigned_locations.csv")
+    df=pd.read_csv(data_path)
+    data=df.groupby("SpotID")
+    num=0
+    for group_name,group_data in data:
+        table.loc[num,"SpotID"]=group_name                  
+        table.loc[num,"OriginalCID"]=",".join([i for i in group_data["OriginalCID"]])
+        table.loc[num,"CellType"]=",".join([i for i in group_data["CellType"]])
+        num+=1
+    print("******************************************************************************************************************")
+    table.to_csv("new_result\\"+i+"\\new_assigned_locations.csv",sep=",",index=False)
+
+
+    
