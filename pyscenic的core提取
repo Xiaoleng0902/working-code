@@ -1,0 +1,71 @@
+import os
+import re
+# import  cellhint
+import numpy as np
+import loompy as lp
+import pandas as pd
+import scanpy as sc
+
+
+class StIntegration():
+    def __init__(self, root_path, copykat_path, cancer):
+        self.root_path = root_path
+        self.copykat = copykat_path
+        self.cancer = cancer
+
+    def ST_count_txt_path(self):
+        all_path = []
+        for i in os.listdir(self.root_path):
+            cancer_type = re.findall(r"\D*", i)[0]
+            if cancer_type == self.cancer:
+                slices = os.listdir(os.path.join(self.root_path, i))
+                slices_path = os.path.join(self.root_path, i)
+                for slice in slices:
+                    if re.findall(r"\.*ST_count", slice):
+                        path = os.path.join(slices_path, slice)
+                        all_path.append(path)
+        return all_path
+
+    def Copykat_patg(self):
+        all_path = []
+        cancer_slices = []
+        for i in os.listdir(self.copykat):
+            slices = os.listdir(os.path.join(self.copykat, i))
+            slices_path = os.path.join(self.copykat, i)
+            cancer_type = re.findall(r"\D*", i)[0]
+            if cancer_type == self.cancer:
+                for slice in slices:
+                    if re.findall(r"\.*_BdyTumorCore", slice):
+                        path = os.path.join(slices_path, slice)
+                        a = i + "_" + slice
+                        name = a.split("_BdyTumorCore.txt")
+                        cancer_slices.append(name[0])
+                        all_path.append(path)
+        return all_path, cancer_slices
+
+
+
+cancer_List=["brca","cesc","crc","cscc","gbm","gist","hgsc","hn-as","ipnm","lihc","luad","mibc","rcc","pcnsl","pdac","prad","ovca","oscc","skcm"]
+for cancer_name in cancer_List:
+    st=StIntegration(r"E:\1ROGUE",r"E:\copykat",cancer=cancer_name)
+    counts=st.ST_count_txt_path()
+    copykat,cancer_slices=st.Copykat_patg()
+    for count,BdyTumorCore in zip(counts,copykat):
+        print(f"正在读取路径{count}下的数据")
+        adata=sc.read_text(count).T
+        match_name=cancer_name+"\d+"
+        cancer=re.findall(match_name,count)[0]
+        slice=re.findall("slice\d+",count)[0]
+        save_name=cancer+"-"+slice+".loom"
+        save_path=r"E:\苏师兄代码和文件\样本信息1"
+        df=pd.read_table(BdyTumorCore)
+        adata.obs=df
+
+        adata=adata[adata.obs["LocationType"]=="Boundary",:]
+        try:
+            row_attrs = {"Gene": np.array(adata.var_names),}
+            col_attrs = {"CellID": np.array(adata.obs_names)}
+            lp.create(os.path.join(save_path,save_name),adata.X.transpose(),row_attrs,col_attrs)
+            print(f"保存文件{save_name}完毕")
+        except Exception as e:
+            print(e)
