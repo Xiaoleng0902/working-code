@@ -1,0 +1,15 @@
+import  pandas as pd
+da=pd.read_csv(r"C:\Users\冷锋\PycharmProjects\pythonProject\师兄文件代码测试\marker\starfysh_marker_big_CAF_TAM.csv",sep="\t")
+
+
+Fibroblasts=["ACTA2","MCAM","MYLK","MYL9","FAP","THY1","PDGFRA","PDGFRB","COL1A1","COL1A2","COL3A1","DCN","C1R","OGN","FGF7"]
+Macrophage=["LGMN","CTSB","CD14","CD163","FCGR3A","AIF1","FCER1G","TYROBP","MARCO","CD68","GLDN","APOE","CCL3L1","C1QB","NUPR1","FOLR2","RNASE1","C1QA","TREM2","CSF1R","S100A8","MAFB","MRC1","MSR1"]
+if len(Fibroblasts) < len(da):
+    Fibroblasts.extend([None] * (len(da) - len(Fibroblasts)))
+da["Fibroblasts"]=Fibroblasts
+
+if len(Macrophage) < len(da):
+    Macrophage.extend([None] * (len(da) - len(Macrophage)))
+da["Macrophage"]=Macrophage
+
+da.to_csv(r"C:\Users\冷锋\PycharmProjects\pythonProject\师兄文件代码测试\marker\starfysh_marker_big.csv",index=False,sep="\t")
