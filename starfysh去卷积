@@ -1,0 +1,130 @@
+import sys
+import os
+import numpy as np
+import pandas as pd
+import torch
+import matplotlib.pyplot as plt
+import matplotlib.font_manager
+from matplotlib import rcParams
+
+import seaborn as sns
+sns.set_style('white')
+import sys
+import os
+import numpy as np
+import pandas as pd
+import torch
+import matplotlib.pyplot as plt
+import matplotlib.font_manager
+from matplotlib import rcParams
+import pandas as pd
+
+import seaborn as sns
+sns.set_style('white')
+font_list = []
+fpaths = matplotlib.font_manager.findSystemFonts()
+for i in fpaths:
+    try:
+        f = matplotlib.font_manager.get_font(i)
+        font_list.append(f.family_name)
+    except RuntimeError:
+        pass
+
+font_list = set(font_list)
+plot_font = 'Helvetica' if 'Helvetica' in font_list else 'FreeSans'
+
+rcParams['font.family'] = plot_font
+rcParams.update({'font.size': 10})
+rcParams.update({'figure.dpi': 300})
+rcParams.update({'figure.figsize': (3,3)})
+rcParams.update({'savefig.dpi': 500})
+
+import warnings
+warnings.filterwarnings('ignore')
+##Load starfysh
+from starfysh import (AA, utils, plot_utils, post_analysis)
+from starfysh import starfysh as sf_model
+from IPython.core.interactiveshell import InteractiveShell
+InteractiveShell.ast_node_interactivity="all"
+import warnings
+warnings.filterwarnings('ignore')
+from starfysh import (AA, utils, plot_utils, post_analysis, utils_integrate)
+from starfysh import starfysh as sf_model
+meta_info = [['luad01_1','luad01_1','luad01_1']]
+meta_info = pd.DataFrame(meta_info,columns=['sample','patient','tissue_type'])
+data_path = r"C:\Users\冷锋\PycharmProjects\pythonProject\师兄文件代码测试\luad01"
+sample_ids=["luad01_1","luad01_2","luad02_1","luad02_2","luad03_1","luad03_2"]
+for marker_path in os.listdir(r"C:\Users\冷锋\PycharmProjects\pythonProject\师兄文件代码测试\marker")[1:]:
+    for sample_id in sample_ids:
+        adata, adata_normed = utils.load_adata(data_folder=data_path,
+                                               sample_id=sample_id, # sample id
+                                               n_genes=2000  # number of highly variable genes to keep
+                                               )
+
+        gene_sig = pd.read_csv(os.path.join(r"C:\Users\冷锋\PycharmProjects\pythonProject\师兄文件代码测试\marker",marker_path),sep="\t")
+        gene_sig = utils.filter_gene_sig(gene_sig, adata.to_df())
+        gene_sig.head()
+        has_histology = False
+        if has_histology:  # read both spatial coords & histology
+            img_metadata = utils.preprocess_img(data_path,
+                                                sample_id,
+                                                adata_index=adata.obs.index,
+                                                hchannel=False)
+
+            img, map_info, scalefactor = img_metadata['img'], img_metadata['map_info'], img_metadata['scalefactor']
+            map_info = map_info[['array_row', 'array_col']].astype(float)
+        else:  # read only spatial coords
+            map_info = pd.read_csv(os.path.join(data_path, sample_id, 'slice.csv'), header=None,
+                                   names=["A", "array_row", "array_col", "img_col", "img_row"],
+                                   index_col=[0])
+
+            # Create dummy dict. as img_metadata
+            img_metadata = {
+                'img': None,
+                'map_info': map_info,
+                'scalefactor': None
+            }
+        adata.uns['spatial']={}
+
+        folder_path = os.path.join(r"C:\Users\冷锋\PycharmProjects\pythonProject\师兄文件代码测试\result", sample_id)
+
+        if not os.path.exists(folder_path):
+
+            os.makedirs(folder_path)
+            print(f'文件夹 {folder_path} 已创建')
+        else:
+            print(f'文件夹 {folder_path} 已存在')
+            print(folder_path+"\\"+sample_id+"_"+marker_path.split(".csv")[0]+"_dev.csv")
+# Parameters for training
+        visium_args = utils.VisiumArguments(adata,
+                                        adata_normed,
+                                        gene_sig,
+                                        img_metadata,
+                                        sample_id=sample_id
+                                       )
+
+        adata, adata_normed = visium_args.get_adata()
+        anchors_df = visium_args.get_anchors()
+
+        n_repeats = 3
+        epochs = 200
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        model, loss = utils.run_starfysh(visium_args,
+                                     n_repeats=n_repeats,
+                                     epochs=epochs,
+                                     # poe=True,
+                                     device=device)
+        adata, adata_normed = visium_args.get_adata()
+        adata.write(folder_path+"\\"+sample_id+marker_path.split(".csv")[0]+".h5ad")
+        adata_normed.write(folder_path+"\\"+sample_id+marker_path.split(".csv")[0]+"_normed.h5ad")
+        torch.save(model.state_dict(),folder_path+"\\"+sample_id+marker_path.split(".csv")[0]+".pth" )
+
+        inference_outputs, generative_outputs = sf_model.model_eval(model,
+                                                                adata,
+                                                                visium_args,
+                                                                # poe=True,
+                                                                device=device)
+        celltype_dev_qc_m=pd.DataFrame(adata.obsm['qc_m'], index=adata.obs.index, columns=adata.uns['cell_types'])
+        ##Inferred cell-type proportions on Z-space (UMAP):
+        Z_space_qz_m=pd.DataFrame(adata.obsm['qz_m'], index=adata.obs.index, columns=['z'+str(i) for i in range(adata.obsm['qz_m'].shape[1])])
+        celltype_dev_qc_m.to_csv(folder_path+"\\"+sample_id+"_"+marker_path.split(".csv")[0]+"_dev.csv")
