@@ -1,0 +1,73 @@
+import  pandas as pd
+import  os
+import requests
+import pandas as pd
+from bs4 import BeautifulSoup
+header={"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0"}
+class PC():
+    def __init__(self,drug_name_file,save_path):
+        self.save_path=save_path
+        self.drug_table=pd.read_table(drug_name_file,names=["ID","drug"])
+    def Crearte_url(self,url):
+        id=[i.split("CID1")[1].replace("0",'') for i in self.drug_table["ID"]]
+        drug_name_table=self.drug_table["drug"]
+        url_list=[url+i+"/" for i in id]
+        return url_list,  drug_name_table
+    def get_data(self,PC):
+        num=0
+        erro=pd.DataFrame()
+        url_list,drug_name_list=PC[0],PC[1]
+        for url ,drug_name in zip(url_list,drug_name_list):
+            print(f"正在爬取：{drug_name}，  链接为：{url}")
+            try:
+                re=requests.get(url,header)
+                text=re.content
+                soup=BeautifulSoup(text,"lxml")
+                lxy=soup.find("div",id="drugInfoTable")
+                tables=lxy.find_all("table")
+                df = pd.DataFrame()
+                for table in tables:
+                    trs = table.find_all("tr")[2:]
+                    num = 0
+                    for tr in trs:
+                        tds = tr.find_all("td")
+                        side_effect = tds[0].find("a").get_text()
+                        Data_for_drug = tds[1].get_text()
+                        df.loc[num, "Side effect"] = side_effect
+                        df.loc[num, "Data_for_drug"] = Data_for_drug.replace("\n", "")
+                        if Data_for_drug.replace("\n", "") :
+                            x=Data_for_drug.replace("\n", "").split(" - ")
+                            if len(x)== 2 and float(x[1].replace("%", ""))>30:
+                                df.loc[num, "class"] = 1
+                            elif  len(x)==1 and x[0].endswith("%") and x[0].find(",")==-1 and float(x[0].replace("%", ""))>30 :
+                                df.loc[num, "class"] = 1
+                            elif  len(x)==1 and x[0].endswith("%") and x[0].find(",")!=-1 :
+                                x=x[0].split(",")[1]
+                                if float(x.replace("%", ""))>30:
+                                    df.loc[num, "class"] = 1
+                            else:
+                                df.loc[num, "class"] = 0
+                        else:
+                            df.loc[num, "class"] = 0
+                        num += 1
+    
+                df.to_csv(os.path.join(self.save_path,drug_name+".csv"),index=False)
+            
+            except Exception as e:
+                print("发生异常：", e)
+                erro.loc[num,"erro"]=e
+                erro.loc[num,"drug_name"]=drug_name
+                erro.loc[num,"erro_url"]=url
+                num+=1
+        erro.to_csv(r"C:\Users\冷锋\Desktop\药物课题\爬虫\erro.csv",index=False)
+    
+
+
+
+
+
+
+if __name__ == '__main__':
+    a=PC(r"C:\Users\冷锋\Desktop\药物课题\爬虫\drug_names (2).tsv",save_path=r"SIDER")
+    b=a.Crearte_url(url="http://sideeffects.embl.de/drugs/")
+    c=a.get_data(b)
