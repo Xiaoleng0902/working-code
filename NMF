@@ -1,0 +1,197 @@
+import scanpy as sc
+import pandas as pd
+import numpy as np
+from sklearn.decomposition import NMF
+from sklearn.preprocessing import minmax_scale
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score, davies_bouldin_score
+from scipy.cluster.hierarchy import linkage, cophenet
+from scipy.spatial.distance import pdist
+import seaborn as sns
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+
+# 1. Data Preparation --------------------------------------------------------
+# Extract cancer cell data
+cancer_adata = adata1.uns["AUcell"][adata1.uns["AUcell"].obs["Type"]=="cancer"].copy()
+# cancer_adata.write.h5ad("/data/xujuan/XiaoL/XiaoL测试/数据/肝癌/patient_h5ad_files/HCC04_drug.h5ad")
+# Get drug response genes
+sc.tl.rank_genes_groups(adata1.uns['AUcell'], method="wilcoxon", groupby="Type")
+drug_genes = sc.get.rank_genes_groups_df(adata1.uns['AUcell'], group="cancer")
+
+# Create drug response matrix (genes x cells)
+drug_matrix = cancer_adata.X.T  # Convert to dense matrix (genes × cells)
+
+# Normalize the matrix (min-max scaling per gene)
+drug_matrix = minmax_scale(drug_matrix, axis=1)  # Normalize each gene across cells
+
+# 2. NMF Analysis with Improved K Selection --------------------------------
+k_range = range(3, 10)  # Wider range for K exploration
+coph_scores = []
+silhouette_scores = []
+db_scores = []
+reconstruction_errors = []
+W_list = []
+H_list = []
+
+for k in k_range:
+    # Run NMF with multiple initializations
+    best_error = np.inf
+    best_W = None
+    best_H = None
+    
+    for init in range(3):  # Multiple initializations for stability
+        nmf = NMF(n_components=k, max_iter=1000, random_state=2025+init, 
+                 init='nndsvd', solver='mu', beta_loss='kullback-leibler')
+        W = nmf.fit_transform(drug_matrix)
+        H = nmf.components_
+        current_error = nmf.reconstruction_err_
+        
+        if current_error < best_error:
+            best_error = current_error
+            best_W = W
+            best_H = H
+    
+    reconstruction_errors.append(best_error)
+    W_list.append(best_W)
+    H_list.append(best_H)
+    
+    # Calculate cophenetic correlation
+    Z = linkage(best_H.T, 'ward')  # Changed to use H.T for cell clustering
+    coph_dist = cophenet(Z)
+    true_dist = pdist(best_H.T)
+    coph_scores.append(np.corrcoef(true_dist, coph_dist)[0, 1])
+    
+    # Calculate clustering metrics
+    if k > 1:  # Silhouette score requires at least 2 clusters
+        kmeans = KMeans(n_clusters=k, random_state=2025).fit(best_H.T)
+        silhouette_scores.append(silhouette_score(best_H.T, kmeans.labels_))
+        db_scores.append(davies_bouldin_score(best_H.T, kmeans.labels_))
+    else:
+        silhouette_scores.append(np.nan)
+        db_scores.append(np.nan)
+
+# Plot K selection metrics
+import matplotlib as mpl
+mpl.rcParams['axes.spines.right'] = False
+mpl.rcParams['axes.spines.top'] = False
+nature_colors = ["#4E79A7", "#F28E2B", "#E15759", "#76B7B2", 
+                 "#59A14F", "#EDC948", "#B07AA1", "#FF9DA7", 
+                 "#9C755F", "#BAB0AC"]
+
+# Modified K selection metrics plot
+fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+for ax in axes.flat:
+    ax.spines['right'].set_visible(False)
+    ax.spines['top'].set_visible(False)
+    
+# Cophenetic correlation
+axes[0,0].plot(k_range, coph_scores, 'o-', color=nature_colors[0])
+axes[0,0].set_title('Cophenetic Correlation', fontsize=12)
+axes[0,0].set_xlabel('Number of components (K)', fontsize=10)
+
+# Silhouette score
+axes[0,1].plot(k_range, silhouette_scores, 'o-', color=nature_colors[1])
+axes[0,1].set_title('Silhouette Score', fontsize=12)
+axes[0,1].set_xlabel('Number of components (K)', fontsize=10)
+
+# Davies-Bouldin score
+axes[1,0].plot(k_range, db_scores, 'o-', color=nature_colors[2])
+axes[1,0].set_title('Davies-Bouldin Index (lower better)', fontsize=12)
+axes[1,0].set_xlabel('Number of components (K)', fontsize=10)
+
+# Reconstruction error
+axes[1,1].plot(k_range, reconstruction_errors, 'o-', color=nature_colors[3])
+axes[1,1].set_title('Reconstruction Error', fontsize=12)
+axes[1,1].set_xlabel('Number of components (K)', fontsize=10)
+
+plt.tight_layout()
+plt.show()
+
+# Determine best K using combined metrics
+# Weighted approach (adjust weights as needed)
+normalized_coph = (coph_scores - np.min(coph_scores)) / (np.max(coph_scores) - np.min(coph_scores))
+normalized_sil = (np.array(silhouette_scores) - np.nanmin(silhouette_scores)) / (np.nanmax(silhouette_scores) - np.nanmin(silhouette_scores))
+normalized_db = 1 - ((np.array(db_scores) - np.nanmin(db_scores)) / (np.nanmax(db_scores) - np.nanmin(db_scores)))
+
+combined_scores = 0.4*normalized_coph + 0.3*normalized_sil + 0.3*normalized_db
+best_k = k_range[np.nanargmax(combined_scores)]
+print(f"Best K determined: {best_k}")
+
+# 3. Final NMF with Optimal K -----------------------------------------------
+# Get the best W and H from our previous runs
+best_idx = k_range.index(best_k)
+best_W = W_list[best_idx]
+best_H = H_list[best_idx]
+
+# 4. Cell Clustering --------------------------------------------------------
+# K-means clustering on H matrix (cells x components)
+kmeans = KMeans(n_clusters=best_k, random_state=2025).fit(best_H.T)
+cancer_adata.obs['NMF_modules'] = ['NMF_' + str(x+1) for x in kmeans.labels_]
+
+# Evaluate clustering quality
+print("Clustering quality metrics:")
+print(f"Silhouette score: {silhouette_score(best_H.T, kmeans.labels_)}")
+print(f"Davies-Bouldin score: {davies_bouldin_score(best_H.T, kmeans.labels_)}")
+cluster_gene_profiles = {}
+
+# For each cluster, find the average gene expression profile
+for cluster in range(best_k):
+    cluster_cells = cancer_adata.obs[cancer_adata.obs['NMF_modules'] == f'NMF_{cluster+1}'].index
+    cluster_matrix = drug_matrix[:, cancer_adata.obs.index.isin(cluster_cells)]
+    avg_expression = np.mean(cluster_matrix, axis=1)
+    
+    # Get top genes for this cluster's average expression
+    gene_scores = pd.Series(avg_expression, index=cancer_adata.var_names)
+    top_genes = gene_scores.sort_values(ascending=False).head(20)
+    cluster_gene_profiles[f'Cluster_{cluster+1}'] = top_genes
+# 5. Visualization ---------------------------------------------------------
+# UMAP visualization using NMF components as representation
+sc.pp.neighbors(cancer_adata, use_rep='X')  # Using original data
+sc.tl.umap(cancer_adata)
+
+# Plot clusters
+plt.figure(figsize=(8, 6))
+plt.figure(figsize=(8, 6))
+sc.pl.umap(
+    cancer_adata, 
+    color='NMF_modules',
+    show=False,
+    legend_loc='on data',
+    title='NMF Clustering (K-means)',
+    palette=nature_colors[:best_k],
+    frameon=False  # Remove border
+)
+plt.tight_layout()
+plt.show()
+
+# Modified gene expression bar plots
+for cluster in range(best_k):
+    plt.figure(figsize=(10, 5))
+    top_genes = cluster_gene_profiles[f'Cluster_{cluster+1}'].head(10)
+    top_genes.plot(
+        kind='bar',
+        color=nature_colors[cluster % len(nature_colors)],
+        edgecolor='none'
+    )
+    plt.title(f'Top 10 Genes for Cluster {cluster+1}', fontsize=12)
+    plt.ylabel('Average Expression', fontsize=10)
+    plt.xticks(rotation=45, ha='right', fontsize=9)
+    plt.gca().spines['right'].set_visible(False)
+    plt.gca().spines['top'].set_visible(False)
+    plt.tight_layout()
+    plt.show()
+
+# 7. Store Results ---------------------------------------------------------
+# Store W and H matrices
+W_final = pd.DataFrame(best_W, index=cancer_adata.var_names, 
+                      columns=[f'NMF_Component_{i+1}' for i in range(best_k)])
+H_final = pd.DataFrame(best_H, columns=cancer_adata.obs_names,
+                      index=[f'NMF_Component_{i+1}' for i in range(best_k)])
+
+# Add NMF components to adata object
+for i in range(best_k):
+    cancer_adata.obs[f'NMF_Component_{i+1}'] = best_H[i, :]
+
+# Store cluster gene profiles
+cluster_gene_df = pd.DataFrame(cluster_gene_profiles)
